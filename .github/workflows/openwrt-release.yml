@@ -1,0 +1,209 @@
+permissions:
+  contents: write
+name: Build OpenWrt Package
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.version }} / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      REPO_APK_KEY: ${{ secrets.REPO_APK_KEY }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 24.10 (ipk, frozen — do not expand)
+          - version: openwrt-24.10
+            target: x86_64
+          - version: openwrt-24.10
+            target: aarch64_cortex-a53
+          - version: openwrt-24.10
+            target: aarch64_generic
+          - version: openwrt-24.10
+            target: arm_cortex-a7
+          - version: openwrt-24.10
+            target: arm_cortex-a9
+          - version: openwrt-24.10
+            target: mips_24kc
+          - version: openwrt-24.10
+            target: mipsel_24kc
+          # 25.12 (apk, all OpenWrt-supported arches)
+          - version: openwrt-25.12
+            target: aarch64_cortex-a53
+          - version: openwrt-25.12
+            target: aarch64_cortex-a72
+          - version: openwrt-25.12
+            target: aarch64_cortex-a76
+          - version: openwrt-25.12
+            target: aarch64_generic
+          - version: openwrt-25.12
+            target: arm_arm1176jzf-s_vfp
+          - version: openwrt-25.12
+            target: arm_arm926ej-s
+          - version: openwrt-25.12
+            target: arm_cortex-a15_neon-vfpv4
+          - version: openwrt-25.12
+            target: arm_cortex-a5_vfpv4
+          - version: openwrt-25.12
+            target: arm_cortex-a7
+          - version: openwrt-25.12
+            target: arm_cortex-a7_neon-vfpv4
+          - version: openwrt-25.12
+            target: arm_cortex-a7_vfpv4
+          - version: openwrt-25.12
+            target: arm_cortex-a8_vfpv3
+          - version: openwrt-25.12
+            target: arm_cortex-a9
+          - version: openwrt-25.12
+            target: arm_cortex-a9_neon
+          - version: openwrt-25.12
+            target: arm_cortex-a9_vfpv3-d16
+          - version: openwrt-25.12
+            target: arm_fa526
+          - version: openwrt-25.12
+            target: arm_xscale
+          - version: openwrt-25.12
+            target: armeb_xscale
+          - version: openwrt-25.12
+            target: i386_pentium-mmx
+          - version: openwrt-25.12
+            target: i386_pentium4
+          - version: openwrt-25.12
+            target: loongarch64_generic
+          - version: openwrt-25.12
+            target: mips64_mips64r2
+          - version: openwrt-25.12
+            target: mips64_octeonplus
+          - version: openwrt-25.12
+            target: mips64el_mips64r2
+          - version: openwrt-25.12
+            target: mips_24kc
+          - version: openwrt-25.12
+            target: mips_mips32
+          - version: openwrt-25.12
+            target: mipsel_24kc
+          - version: openwrt-25.12
+            target: mipsel_24kc_24kf
+          - version: openwrt-25.12
+            target: mipsel_74kc
+          - version: openwrt-25.12
+            target: mipsel_mips32
+          - version: openwrt-25.12
+            target: powerpc64_e5500
+          - version: openwrt-25.12
+            target: powerpc_464fp
+          - version: openwrt-25.12
+            target: powerpc_8548
+          - version: openwrt-25.12
+            target: riscv64_generic
+          - version: openwrt-25.12
+            target: x86_64
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v5
+
+      - name: 📛 Set PKG_NAME from repo
+        run: echo "PKG_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
+
+      - name: 🧰 Set up melmac feed structure
+        run: |
+          # Create a proper OpenWrt feed layout where each package lives in its own subdir
+          mkdir -p feed/${PKG_NAME}
+          # Copy the package sources into the feed subdir (exclude CI and feed itself)
+          rsync -av \
+            --exclude='.git' \
+            --exclude='feed' \
+            --exclude='.github' \
+            ./ feed/${PKG_NAME}/
+
+      - name: 🧮 Compute ARCH
+        run: |
+          if [ "${{ matrix.version }}" = "snapshots" ]; then
+            echo "ARCH=${{ matrix.target }}-SNAPSHOT" >> "$GITHUB_ENV"
+          else
+            echo "ARCH=${{ matrix.target }}-${{ matrix.version }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: 🏗️ Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@v8
+        env:
+          ARCH: ${{ env.ARCH }}
+          FEEDNAME: melmac
+          PACKAGES: ${{ env.PKG_NAME }}
+          INDEX: 0
+          FEED_DIR: ${{ github.workspace }}/feed
+          NO_SHFMT_CHECK: 1
+          NO_REFRESH_CHECK: 1
+          PRIVATE_KEY: ${{ secrets.REPO_APK_KEY }}
+
+      - name: 🏷️ Rename APK with version and target
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(grep -E '^PKG_VERSION *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          PKG_RELEASE=$(grep -E '^PKG_RELEASE *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          for ext in ipk apk; do
+            for f in $(find bin/packages -type f -path "*/melmac/*.${ext}"); do
+              dir=$(dirname "$f")
+              if [ -n "${{ matrix.suffix }}" ]; then
+                mv -v "$f" "$dir/${PKG_NAME}-${PKG_VERSION}-${PKG_RELEASE}_${{ matrix.version }}_${{ matrix.suffix }}.${ext}"
+              else
+                mv -v "$f" "$dir/${PKG_NAME}-${PKG_VERSION}-${PKG_RELEASE}_${{ matrix.version }}_${{ matrix.target }}.${ext}"
+              fi
+            done
+          done
+
+      - name: 📦 Upload artifact for ${{ matrix.target }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}-${{ matrix.target }}-${{ matrix.version }}
+          path: |
+            bin/packages/*/melmac/${{ env.PKG_NAME }}*.ipk
+            bin/packages/*/melmac/${{ env.PKG_NAME }}*.apk
+          if-no-files-found: ignore
+
+  release:
+    name: Release ${{ github.repository }}
+    needs: build
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v5
+
+      - name: 🔍 Extract version and release from Makefile
+        id: version
+        run: |
+          PKG_VERSION=$(grep -E '^PKG_VERSION *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          PKG_RELEASE=$(grep -E '^PKG_RELEASE *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          COMBINED_VERSION="${PKG_VERSION}-${PKG_RELEASE}"
+          echo "📦 Version: $COMBINED_VERSION"
+          echo "version=$COMBINED_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: ⬇️ Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+
+      - name: 🗃️ Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Build v${{ steps.version.outputs.version }}
+          files: |
+            ./release-assets/**/*.ipk
+            ./release-assets/**/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
