@@ -16,6 +16,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     env:
       REPO_APK_KEY: ${{ secrets.REPO_APK_KEY }}
+      PKG_NAME: ${{ github.event.repository.name }}
 
     strategy:
       fail-fast: false
@@ -112,9 +113,6 @@ jobs:
       - name: 🧾 Checkout repo
         uses: actions/checkout@v5
 
-      - name: 📛 Set PKG_NAME from repo
-        run: echo "PKG_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
-
       - name: 🧰 Set up melmac feed structure
         run: |
           # Create a proper OpenWrt feed layout where each package lives in its own subdir
@@ -154,11 +152,7 @@ jobs:
           for ext in ipk apk; do
             for f in $(find bin/packages -type f -path "*/melmac/*.${ext}"); do
               dir=$(dirname "$f")
-              if [ -n "${{ matrix.suffix }}" ]; then
-                mv -v "$f" "$dir/${PKG_NAME}-${PKG_VERSION}-${PKG_RELEASE}_${{ matrix.version }}_${{ matrix.suffix }}.${ext}"
-              else
                 mv -v "$f" "$dir/${PKG_NAME}-${PKG_VERSION}-${PKG_RELEASE}_${{ matrix.version }}_${{ matrix.target }}.${ext}"
-              fi
             done
           done
 
