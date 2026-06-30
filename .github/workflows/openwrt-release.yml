@@ -132,6 +132,17 @@ jobs:
             echo "ARCH=${{ matrix.target }}-${{ matrix.version }}" >> "$GITHUB_ENV"
           fi
 
+      - name: 🧹 Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
       - name: 🏗️ Build with OpenWrt SDK
         uses: openwrt/gh-action-sdk@v8
         env:
