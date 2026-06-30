@@ -72,8 +72,9 @@ jobs:
             target: arm_fa526
           - version: openwrt-25.12
             target: arm_xscale
-          - version: openwrt-25.12
-            target: armeb_xscale
+          # armeb (big-endian ARM) is not in rust's RUST_ARCH_DEPENDS, so
+          # newsboat is silently skipped there — omit it instead of shipping a
+          # false-green job that produces no package.
           - version: openwrt-25.12
             target: i386_pentium-mmx
           - version: openwrt-25.12
@@ -124,6 +125,17 @@ jobs:
             --exclude='.github' \
             ./ feed/${PKG_NAME}/
 
+      - name: 🧩 Add libstfl build dependency to feed
+        # newsboat DEPENDS on +libstfl (provided by the mossdef-org/stfl package).
+        # The SDK has no such package on its own, so newsboat's config.sh fails at
+        # `pkg-config stfl`. Drop the stfl package into the same melmac feed so the
+        # SDK builds libstfl (staging stfl.pc via Build/InstallDev) before newsboat.
+        uses: actions/checkout@v5
+        with:
+          repository: mossdef-org/stfl
+          ref: main
+          path: feed/stfl
+
       - name: 🧮 Compute ARCH
         run: |
           if [ "${{ matrix.version }}" = "snapshots" ]; then
@@ -155,13 +167,26 @@ jobs:
           NO_REFRESH_CHECK: 1
           PRIVATE_KEY: ${{ secrets.REPO_APK_KEY }}
 
+      - name: 🪵 Dump build log on failure
+        if: failure()
+        # The SDK writes a per-package compile log (BUILD_LOG defaults to 1).
+        # Surface it so a "failed to build" shows the real error inline instead
+        # of needing a manual V=s re-run.
+        run: |
+          echo "::group::newsboat compile log"
+          find . -path '*/logs/package/*newsboat*' -name '*.txt' -exec sh -c \
+            'echo "===== $1 ====="; cat "$1"' _ {} \;
+          echo "::endgroup::"
+
       - name: 🏷️ Rename APK with version and target
         run: |
           set -euo pipefail
           PKG_VERSION=$(grep -E '^PKG_VERSION *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
           PKG_RELEASE=$(grep -E '^PKG_RELEASE *:?=' Makefile | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          # Scope to the newsboat package only — the melmac feed now also builds
+          # libstfl (a build dependency), and we must not rename/clobber it.
           for ext in ipk apk; do
-            for f in $(find bin/packages -type f -path "*/melmac/*.${ext}"); do
+            for f in $(find bin/packages -type f -path "*/melmac/${PKG_NAME}[-_]*.${ext}"); do
               dir=$(dirname "$f")
                 mv -v "$f" "$dir/${PKG_NAME}-${PKG_VERSION}-${PKG_RELEASE}_${{ matrix.version }}_${{ matrix.target }}.${ext}"
             done
