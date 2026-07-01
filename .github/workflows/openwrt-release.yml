@@ -84,8 +84,12 @@ jobs:
             target: mips64_mips64r2
           - version: openwrt-25.12
             target: mips64_octeonplus
-          - version: openwrt-25.12
-            target: mips64el_mips64r2
+          # mips64el_mips64r2 is omitted: rust IS listed for it in RUST_ARCH_DEPENDS,
+          # but the rust host toolchain (rust 1.94, target
+          # mips64el-unknown-linux-muslabi64) fails to build in the 25.12 SDK — it
+          # was the sole red job across every run while all 41 other arches, incl.
+          # big-endian mips64 (rustc's own mips64-openwrt-linux-musl target) and
+          # 32-bit mipsel, pass. Re-add once the upstream rust build is fixed.
           - version: openwrt-25.12
             target: mips_24kc
           - version: openwrt-25.12
