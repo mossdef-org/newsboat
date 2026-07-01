@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     env:
-      REPO_APK_KEY: ${{ secrets.REPO_APK_KEY }}
       PKG_NAME: ${{ github.event.repository.name }}
 
     strategy:
